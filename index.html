@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kebun Ajaib 3D dengan Slot Benih</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(255,255,255,0.95);
+      padding: 15px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      width: 320px;
+      z-index: 10;
+      user-select: none;
+    }
+    button {
+      padding: 8px 15px;
+      font-size: 14px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 8px;
+      width: 100%;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 8px;
+      font-size: 16px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    h2 {
+      margin-top: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h2>Kebun Ajaib 3D 🌱🦕🥕</h2>
+
+    <label for="slotSelect">Pilih Slot Benih:</label>
+    <select id="slotSelect">
+      <option value="0">Slot 1</option>
+      <option value="1">Slot 2</option>
+      <option value="2">Slot 3</option>
+      <option value="3">Slot 4</option>
+    </select>
+
+    <label for="seedSelect" style="margin-top:10px;">Pilih Benih dari Toko:</label>
+    <select id="seedSelect">
+      <option value="triceratops">Triceratops (Dinosaurus)</option>
+      <option value="stegosaurus">Stegosaurus (Dinosaurus)</option>
+      <option value="tyrannosaurus">Tyrannosaurus (Dinosaurus)</option>
+      <option value="carrot">Carrot (Wortel)</option>
+    </select>
+
+    <button id="plantBtn">🌱 Tanam Benih</button>
+    <button id="growBtn">💧 Siram & Tumbuhkan</button>
+    <button id="resetBtn" style="background-color:#f44336; margin-top: 5px;">🔄 Reset Benih</button>
+
+    <p id="status" style="margin-top:10px; font-weight:bold;"></p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+
+  <script>
+    // Setup scene, camera, renderer
+    let scene, camera, renderer;
+
+    // 4 slot posisi di kebun (x, z)
+    const slotPositions = [
+      { x: -3, z: -2 },
+      { x: 0, z: -2 },
+      { x: 3, z: -2 },
+      { x: 0, z: 2 },
+    ];
+
+    // Data tiap slot: {seedType, growthStage, seedMesh, plantMesh}
+    const slots = [
+      null, null, null, null
+    ];
+
+    // Seed colors
+    const seedColors = {
+      triceratops: 0x228B22,
+      stegosaurus: 0x8B4513,
+      tyrannosaurus: 0xff4500,
+      carrot: 0xff8c00,
+    };
+
+    // UI elements
+    const slotSelect = document.getElementById("slotSelect");
+    const seedSelect = document.getElementById("seedSelect");
+    const plantBtn = document.getElementById("plantBtn");
+    const growBtn = document.getElementById("growBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const statusEl = document.getElementById("status");
+
+    // Current selected slot index
+    let currentSlot = 0;
+
+    slotSelect.addEventListener("change", () => {
+      currentSlot = parseInt(slotSelect.value);
+      updateStatus();
+    });
+
+    seedSelect.addEventListener("change", () => {
+      updateStatus();
+    });
+
+    plantBtn.addEventListener("click", () => {
+      plantSeed(currentSlot);
+    });
+
+    growBtn.addEventListener("click", () => {
+      growSeed(currentSlot);
+    });
+
+    resetBtn.addEventListener("click", () => {
+      resetSeed(currentSlot);
+    });
+
+    init();
+    initSlots();
+    animate();
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xa7d8a7);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 10, 15);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias:true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // Lights
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(5, 10, 7.5);
+      scene.add(light);
+
+      const ambientLight = new THREE.AmbientLight(0x404040);
+      scene.add(ambientLight);
+
+      // Ground
+      const groundGeo = new THREE.BoxGeometry(15, 0.5, 15);
+      const groundMat = new THREE.MeshLambertMaterial({ color: 0x654321 });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.position.y = -0.25;
+      scene.add(ground);
+
+      window.addEventListener("resize", onWindowResize);
+    }
+
+    function initSlots() {
+      for (let i = 0; i < slots.length; i++) {
+        slots[i] = {
+          seedType: null,
+          growthStage: 0,
+          seedMesh: null,
+          plantMesh: null,
+          position: slotPositions[i],
+        };
+      }
+      updateStatus();
+    }
+
+    function plantSeed(slotIndex) {
+      const slot = slots[slotIndex];
+      if (slot.growthStage !== 0) {
+        alert("Slot ini sudah ditanami. Silakan reset dulu!");
+        return;
+      }
+      slot.seedType = seedSelect.value;
+      slot.growthStage = 0;
+
+      // Buat benih mesh sesuai tipe
+      if(slot.seedMesh) {
+        scene.remove(slot.seedMesh);
+        slot.seedMesh.geometry.dispose();
+        slot.seedMesh.material.dispose();
+        slot.seedMesh = null;
+      }
+      if(slot.plantMesh) {
+        scene.remove(slot.plantMesh);
+        slot.plantMesh.geometry.dispose();
+        slot.plantMesh.material.dispose();
+        slot.plantMesh = null;
+      }
+
+      let seedMesh;
+      if(slot.seedType === "carrot") {
+        const seedGeo = new THREE.ConeGeometry(0.2, 0.5, 16);
+        const seedMat = new THREE.MeshStandardMaterial({ color: seedColors[slot.seedType] });
+        seedMesh = new THREE.Mesh(seedGeo, seedMat);
+      } else {
+        const seedGeo = new THREE.SphereGeometry(0.25, 16, 16);
+        const seedMat = new THREE.MeshStandardMaterial({ color: seedColors[slot.seedType] });
+        seedMesh = new THREE.Mesh(seedGeo, seedMat);
+      }
+      seedMesh.position.set(slot.position.x, 0.25, slot.position.z);
+      scene.add(seedMesh);
+
+      slot.seedMesh = seedMesh;
+      slot.growthStage = 1; // Benih sudah ditanam (stage 1)
+      updateStatus();
+    }
+
+    function growSeed(slotIndex) {
+      const slot = slots[slotIndex];
+      if(slot.growthStage === 0) {
+        alert("Belum ada benih di slot ini. Silakan tanam dulu!");
+        return;
+      }
+      if(slot.growthStage === 1) {
+        // Benih ke tunas
+        slot.seedMesh.scale.set(1, 2, 1);
+        slot.seedMesh.material.color.offsetHSL(0.1, 0.2, 0.1);
+        slot.growthStage = 2;
+        statusEl.textContent = `Slot ${slotIndex+1}: Tunas mulai tumbuh 🌿`;
+      } else if(slot.growthStage === 2) {
+        // Tunas ke tanaman/hewan dewasa
+        scene.remove(slot.seedMesh);
+        slot.seedMesh.geometry.dispose();
+        slot.seedMesh.material.dispose();
+        slot.seedMesh = null;
+
+        if(slot.plantMesh) {
+          scene.remove(slot.plantMesh);
+          slot.plantMesh.geometry.dispose();
+          slot.plantMesh.material.dispose();
+          slot.plantMesh = null;
+        }
+
+        let plantMesh;
+        if(slot.seedType === "carrot") {
+          // Wortel: kerucut + daun hijau
+          const carrotGeo = new THREE.ConeGeometry(0.3, 1, 16);
+          const carrotMat = new THREE.MeshStandardMaterial({ color: seedColors["carrot"] });
+          const carrot = new THREE.Mesh(carrotGeo, carrotMat);
+          carrot.position.y = 0.5;
+
+          const leavesGeo = new THREE.SphereGeometry(0.25, 8, 8);
+          const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+          const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+          leaves.position.y = 1;
+
+          plantMesh = new THREE.Group();
+          plantMesh.add(carrot);
+          plantMesh.add(leaves);
+          plantMesh.position.set(slot.position.x, 0, slot.position.z);
+        } else {
+          // Dinosaurus kotak
+          const dinoGeo = new THREE.BoxGeometry(1, 1, 2);
+          const dinoMat = new THREE.MeshStandardMaterial({ color: seedColors[slot.seedType] });
+          plantMesh = new THREE.Mesh(dinoGeo, dinoMat);
+          plantMesh.position.set(slot.position.x, 0.5, slot.position.z);
+        }
+        scene.add(plantMesh);
+        slot.plantMesh = plantMesh;
+        slot.growthStage = 3;
+        statusEl.textContent = `Slot ${slotIndex+1}: ${capitalize(slot.seedType)} telah tumbuh dewasa! 🌱`;
+      } else {
+        alert(`Slot ${slotIndex+1} sudah tumbuh dewasa!`);
+      }
+    }
+
+    function resetSeed(slotIndex) {
+      const slot = slots[slotIndex];
+      if(slot.seedMesh) {
+        scene.remove(slot.seedMesh);
+        slot.seedMesh.geometry.dispose();
+        slot.seedMesh.material.dispose();
+        slot.seedMesh = null;
+      }
+      if(slot.plantMesh) {
+        scene.remove(slot.plantMesh);
+        slot.plantMesh.geometry.dispose();
+        slot.plantMesh.material.dispose();
+        slot.plantMesh = null;
+      }
+      slot.seedType = null;
+      slot.growthStage = 0;
+      statusEl.textContent = `Slot ${slotIndex+1} telah di-reset.`;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      // Rotasi benih dan tanaman
+      slots.forEach(slot => {
+        if(slot.seedMesh && slot.growthStage < 3) {
+          slot.seedMesh.rotation.y += 0.01;
+        }
+        if(slot.plantMesh) {
+          slot.plantMesh.rotation.y += 0.01;
+        }
+      });
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function updateStatus() {
+      const slot = slots[currentSlot];
+      if(!slot.seedType) {
+        statusEl.textContent = `Slot ${currentSlot+1} kosong. Pilih benih dan tanam!`;
+      } else {
+        let stageText = "";
+        switch(slot.growthStage) {
+          case 1: stageText = "Benih ditanam."; break;
+          case 2: stageText = "Tunas tumbuh."; break;
+          case 3: stageText = "Tanaman/hewan dewasa."; break;
+          default: stageText = "Kosong.";
+        }
+        statusEl.textContent = `Slot ${currentSlot+1}: ${capitalize(slot.seedType)} - ${stageText}`;
+      }
+    }
+
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+  </script>
+</body>
+</html>
